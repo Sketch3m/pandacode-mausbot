@@ -31,6 +31,8 @@ Both projects already implement bot identities, memory, schedules and multi-bot 
 ## Validation
 
 - Node 24 remote sandbox: 3/3 importer parser/mapping/safety tests passed November 21, 2026.
+- Real upstream fixture validation: OpenMausBot's shared/package-fixtures/full-team.v2.json mapped Sales desk to three native bot definitions (Morgan, Scout, Quill) and Deal desk.
+- Parser microbenchmark (Node 24, 1,000 iterations each, remote CPU): 1 agent median 0.0036 ms / p95 0.0052 ms; 8 agents median 0.0167 ms / p95 0.0373 ms; 32 agents median 0.0625 ms / p95 0.112 ms. Microbenchmark excludes file I/O, database writes, IPC and model execution. Run node scripts/mausbot-import-benchmark.mjs to reproduce.
 - Full TypeScript type checking: pnpm exec tsc --noEmit passed (remote pnpm installed dependencies with lifecycle scripts disabled).
 - Full node --test tests/*.test.mjs first requires dist/ built, because tests/bundle.test.mjs reads dist/index.html. Those build-dependent tests have **not been validated**.
 - Vite production build exceeded a remote execution time limit; no compiled desktop binary or end-to-end feature verification is claimed.
