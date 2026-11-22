@@ -1,5 +1,7 @@
 # PandaCode
 
+> **This is a fork of PandaCode** — [original project](https://github.com/aicodeking/pandacode). This fork adds a data-only OpenMausBot team importer while retaining PandaCode's Tauri/Rust desktop runtime. See [integration notes](docs/openmausbot-integration.md).
+
 A small, native desktop workspace for coding agents. PandaCode runs the coding
 CLIs you already use — **Claude Code, Codex, Kimi Code, OpenCode, GLM Coding
 Plan, Xiaomi MiMo and Alibaba Token Plan** (through Claude Code), **GitHub Copilot CLI, Antigravity,
