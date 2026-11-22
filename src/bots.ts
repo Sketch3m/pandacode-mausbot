@@ -7,6 +7,7 @@ import { infoMark } from './tooltip';
 import type { Provider, ProviderId, ProviderModel, ReasoningEffort } from './types';
 import { advertisedModelsOnly, modelChoices } from './model-catalog';
 import { connectInput, guideToggled } from './bots-connect';
+import { readMausbotFile } from './mausbot-import';
 import { avatarPicker, botAvatarHtml, colorPicker, handleAvatarPicker } from './bot-avatars';
 import { age, renderPanel, panelClick, panelSubmit, panelChange, invalidateActivity, invalidateCapabilities, type PanelContext, type Tab } from './bots-panels';
 
@@ -323,6 +324,7 @@ export function mountBots(host: HTMLElement, options: BotsOptions): BotsView {
       <div class="bc-brain" role="group" aria-label="Harness and model">${harness}${model}<label class="bc-control"><span>Reasoning</span>${efforts}</label></div>
       <div class="bc-actions">${bots.length && !single ? '<button type="button" class="secondary-button" data-bots-action="cancel-edit">Cancel</button>' : ''}<button type="submit" class="primary-button bc-submit" ${creating ? 'disabled aria-busy="true"' : ''}>${creating ? '<span class="support-spinner" aria-hidden="true"></span>Creating bot…' : 'Create bot'}</button></div>
     </form>
+    <div class="bc-actions"><button type="button" class="secondary-button" data-bots-action="mausbot-import">Import OpenMausBot team (.json)…</button><input type="file" data-mausbot-file accept=".json,application/json" hidden></div>
     <section class="bc-suggestions" aria-labelledby="bc-suggestions-title"><h4 id="bc-suggestions-title">Suggestions</h4><div class="bc-rail"><ul>${cards}</ul></div></section></div>`;
   }
 
@@ -509,7 +511,7 @@ export function mountBots(host: HTMLElement, options: BotsOptions): BotsView {
     // A selected bot whose detail is loading or failed shows only that state, never the create form.
     if (!detail && selected && editing !== 'new' && !single) { pane.innerHTML = alert || '<p class="dialog-loading" role="status">Loading bot…</p>'; return; }
     if (editing === 'new' || !detail) {
-      pane.innerHTML = alert + (single && !detail ? '<p class="bots-empty-note">This bot no longer exists.</p>' : renderCreate());
+      pane.innerHTML = alert + confirm + (single && !detail ? '<p class="bots-empty-note">This bot no longer exists.</p>' : renderCreate());
       const list = pane.querySelector<HTMLElement>('.bc-rail');
       if (list) { list.scrollLeft = rail; railFades(list); }
     } else {
@@ -576,6 +578,46 @@ export function mountBots(host: HTMLElement, options: BotsOptions): BotsView {
     });
   }
 
+  /** Import a data-only OpenMausBot team into PandaCode's existing native bots. */
+  function importMausbot(file: File): void {
+    void readMausbotFile(file).then(blueprint => {
+      const provider = installed()[0];
+      if (!provider) throw new Error('Install and sign into a coding CLI before importing bots.');
+      const duplicate = blueprint.agents.find(agent => bots.some(bot => bot.name.toLowerCase() === agent.name.toLowerCase()));
+      if (duplicate) throw new Error('A bot named ' + duplicate.name + ' already exists. Rename it before importing.');
+      context.confirm(
+        'Import ' + blueprint.name + '?',
+        'Create ' + blueprint.agents.length + ' bots and ' + blueprint.rooms.length + ' shared channels? Imported bots use Ask permissions, your installed ' + provider.name + ' harness, and no scheduled runs. Skills, apps, secrets, models and computer access are NOT imported.',
+        'Import team',
+        async () => {
+          const ids = new Map<string, string>();
+          try {
+            for (const agent of blueprint.agents) {
+              const input: BotInput = {
+                name: agent.name, role: agent.role, instructions: agent.instructions,
+                goals: '', soul: agent.soul, avatar: 'panda:0', color: '',
+                provider: provider.id, model: options.defaultModel(provider.id) || 'default',
+                mode: 'ask', heartbeatMinutes: 0, reasoningEffort: '',
+                backupModels: [], fallbackMode: 'ask', notify: true, whileWorking: 'queue', showPlan: false,
+              };
+              const bot = await options.call<Bot>('bot_create', { input });
+              ids.set(agent.key, bot.id);
+            }
+            for (const room of blueprint.rooms) {
+              const memberIds = room.members.map(key => ids.get(key)).filter((id): id is string => Boolean(id));
+              await options.call('bot_shared_channel_create', { name: room.name, memberIds });
+            }
+            selected = ids.get(blueprint.agents[0].key) ?? selected;
+            options.notify('Imported ' + blueprint.agents.length + ' bots and ' + blueprint.rooms.length + ' channels from OpenMausBot.');
+          } finally {
+            editing = null;
+            await load();
+          }
+        },
+      );
+    }).catch(failure => { error = message(failure); render(); });
+  }
+
   const click = (event: MouseEvent) => {
     if (handleAvatarPicker(event)) return;
     // A click anywhere outside the More menu or the icon popover closes it, like any menu.
@@ -614,6 +656,7 @@ export function mountBots(host: HTMLElement, options: BotsOptions): BotsView {
     if (moreOpen && action !== 'more') moreOpen = false;
     if (action === 'new') { editing = 'new'; draft = newDraft(); nameError = ''; confirming = null; render(); pane.querySelector<HTMLInputElement>('input[name=name]')?.focus(); }
     else if (action === 'dismiss-error') { error = ''; render(); pane.querySelector<HTMLElement>('[role=tab][aria-selected=true],.bots-form input[name=name],button')?.focus(); }
+    else if (action === 'mausbot-import') pane.querySelector<HTMLInputElement>('input[data-mausbot-file]')?.click();
     else if (action === 'models-retry') { const select = pane.querySelector<HTMLSelectElement>('.bots-form select[name=model]'), provider = pane.querySelector<HTMLSelectElement>('.bots-form select[name=provider]'); if (select && provider) { loadFormModels(provider.value as ProviderId, select, select.value); select.focus(); } }
     else if (action === 'cancel-edit') { editing = null; nameError = ''; render(); }
     else if (action === 'more') { moreOpen = !moreOpen; render(); if (moreOpen) pane.querySelector<HTMLElement>('.bp-menu [role=menuitem]')?.focus(); }
@@ -669,6 +712,13 @@ export function mountBots(host: HTMLElement, options: BotsOptions): BotsView {
   const change = (event: Event) => {
     if (handleAvatarPicker(event)) return;
     const target = event.target as HTMLElement;
+    if (target.matches('input[data-mausbot-file]')) {
+      const input = target as HTMLInputElement;
+      const file = input.files?.[0];
+      input.value = '';
+      if (file) importMausbot(file);
+      return;
+    }
     if (target.matches('input[data-soul-file]')) {
       const input = target as HTMLInputElement;
       const file = input.files?.[0];
